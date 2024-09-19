@@ -1,5 +1,3 @@
-# app.R
-
 # Increase file upload size to 500 MB
 options(shiny.maxRequestSize = 500 * 1024^2)
 
@@ -40,7 +38,6 @@ tryCatch({
   source("Scripts/gene_regulatory_networks.R")
   source("Scripts/gwas_associations.R")
   source("Scripts/trajectory_analysis.R")
-  #source("Scripts/cell_communication.R")
   source("Scripts/multimodal_analysis.R")
   source("Scripts/differential_expression.R")
   source("Scripts/custom_differential_expression.R")
@@ -51,13 +48,13 @@ tryCatch({
 # Define UI for application
 ui <- fluidPage(
   useShinyjs(),
-  titlePanel("Heraclomics: Single-cell RNA-seq Analysis"),
+  titlePanel("Heracleomics: Single-cell RNA-seq Analysis"),
   
   sidebarLayout(
     sidebarPanel(
       navbarPage("Heracleomics",
                  tabPanel("Home", 
-                          h3("Welcome to Heraclomics"),
+                          h3("Welcome to Heracleomics"),
                           p("A comprehensive tool for single-cell RNA-seq analysis."),
                           p("Choose 'New' to start a new analysis or 'Old' to load a previously saved environment."),
                           actionButton("start_new", "New"),
@@ -66,7 +63,7 @@ ui <- fluidPage(
                  tabPanel("Load Data", 
                           uiOutput("load_data_ui")
                  ),
-                 # ... other tabPanels ...
+                 # Add other tabPanels as needed
       )
     ),
     mainPanel(
@@ -80,7 +77,11 @@ ui <- fluidPage(
 
 # Define server logic
 server <- function(input, output, session) {
-  # Initialize data reactive values
+  
+  # Reactive value for storing the loaded data for QC
+  data_for_qc <- reactiveVal(NULL)
+  
+  # Initialize reactive values to store data for different stages
   data <- reactiveValues(
     for_qc = NULL,
     for_integration = NULL,
@@ -120,12 +121,16 @@ server <- function(input, output, session) {
     operation(seurat_obj)
   })
   
+  # Event to handle starting a new analysis
   observeEvent(input$start_new, {
     tryCatch({
       output$load_data_ui <- renderUI({
         load_data_ui("load_data")
       })
-      data$for_qc <- load_data_server("load_data", reactive(data$for_qc))
+      
+      # Assign the loaded data to the data_for_qc reactive value
+      load_data_server("load_data", data_for_qc)
+      
       output$current_step <- renderText("Step 1: Load Your Data")
     }, error = function(e) {
       output$error_output <- renderPrint({
@@ -134,14 +139,13 @@ server <- function(input, output, session) {
     })
   })
   
+  # Event to handle continuing an old analysis
   observeEvent(input$continue_old, {
-    # Implement loading of previously saved environment
+    # Implement logic for loading previously saved environment
     output$current_step <- renderText("Loading Previous Environment...")
   })
   
-  # ... other event observers ...
-  
-  # Error handling
+  # Error handling output
   output$error_output <- renderPrint({
     if (!is.null(attr(session$output, "error"))) {
       paste("An error occurred:", attr(session$output, "error")$message)
