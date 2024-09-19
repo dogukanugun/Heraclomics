@@ -1,5 +1,4 @@
-# load_data.R
-
+# Required Libraries
 library(shiny)
 library(shinyjs)
 library(Seurat)
@@ -53,10 +52,8 @@ load_data_server <- function(id, data_for_qc) {
       shinyjs::disable("submit_data")
       output$status <- renderText("Loading data... Please wait.")
       
-      # Use reactive values inside isolate to avoid dependency issues
+      # Get dataset type and files
       dataset_type <- isolate(input$dataset_type)
-      
-      # Prepare files based on dataset type
       files <- isolate({
         if (dataset_type == "10X Data") {
           req(input$matrix, input$features, input$barcodes)
@@ -79,6 +76,7 @@ load_data_server <- function(id, data_for_qc) {
                                 "SingleCellExperiment" = readRDS(files$datapath)
           )
           
+          # Convert non-Seurat data to Seurat object if necessary
           if (!inherits(loaded_data, "Seurat")) {
             loaded_data <- CreateSeuratObject(counts = loaded_data)
           }
@@ -91,7 +89,7 @@ load_data_server <- function(id, data_for_qc) {
         (function(result) {
           if (result$success) {
             data(result$data)
-            data_for_qc(result$data)  # Update the reactive value
+            data_for_qc(result$data)  # Update reactive value for QC
             
             output$preview <- renderTable({
               head(GetAssayData(result$data, slot = "counts")[1:10, 1:6])
@@ -147,7 +145,7 @@ read10x_files <- function(files) {
 
 # Helper function for reading count matrices
 read_count_matrix <- function(file_path, ext) {
-  data <- switch(ext,
+  data <- switch(tolower(ext),
                  "txt" = , "tsv" = read.delim(file_path, row.names = 1),
                  "csv" = read.csv(file_path, row.names = 1),
                  stop("Unsupported file format")
