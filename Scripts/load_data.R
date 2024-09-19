@@ -1,4 +1,3 @@
-# Required Libraries
 library(shiny)
 library(shinyjs)
 library(Seurat)
@@ -19,14 +18,16 @@ load_data_ui <- function(id) {
                  choices = c("10X Data", "Seurat Object", "Count Matrix", "AnnData", "Loom", "SingleCellExperiment")),
     uiOutput(ns("file_input_ui")),
     actionButton(ns("submit_data"), "Submit"),
+    br(),  # Add space
     tableOutput(ns("preview")),
     verbatimTextOutput(ns("status")),
+    br(),  # Add space
     actionButton(ns("next_step"), "Continue to Quality Control", disabled = TRUE)
   )
 }
 
 # Server logic for data loading
-load_data_server <- function(id, data_for_qc) {
+load_data_server <- function(id, data_for_qc, go_to_qc) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     data <- reactiveVal(NULL)
@@ -52,8 +53,10 @@ load_data_server <- function(id, data_for_qc) {
       shinyjs::disable("submit_data")
       output$status <- renderText("Loading data... Please wait.")
       
-      # Get dataset type and files
+      # Use reactive values inside isolate to avoid dependency issues
       dataset_type <- isolate(input$dataset_type)
+      
+      # Prepare files based on dataset type
       files <- isolate({
         if (dataset_type == "10X Data") {
           req(input$matrix, input$features, input$barcodes)
@@ -76,7 +79,6 @@ load_data_server <- function(id, data_for_qc) {
                                 "SingleCellExperiment" = readRDS(files$datapath)
           )
           
-          # Convert non-Seurat data to Seurat object if necessary
           if (!inherits(loaded_data, "Seurat")) {
             loaded_data <- CreateSeuratObject(counts = loaded_data)
           }
@@ -89,7 +91,7 @@ load_data_server <- function(id, data_for_qc) {
         (function(result) {
           if (result$success) {
             data(result$data)
-            data_for_qc(result$data)  # Update reactive value for QC
+            data_for_qc(result$data)  # Update the reactive value
             
             output$preview <- renderTable({
               head(GetAssayData(result$data, slot = "counts")[1:10, 1:6])
@@ -105,10 +107,15 @@ load_data_server <- function(id, data_for_qc) {
         })
     })
     
+    # Navigate to the Quality Control step
+    observeEvent(input$next_step, {
+      go_to_qc()  # Call the function to move to the QC step
+    })
+    
     return(data)
   })
 }
-
+# Helper function for loading 10X data from individual files
 # Helper function for loading 10X data from individual files
 read10x_files <- function(files) {
   matrix_path <- files$matrix$datapath
@@ -123,6 +130,9 @@ read10x_files <- function(files) {
     if(endsWith(features_path, ".gz")) gzfile(features_path) else features_path,
     header = FALSE, stringsAsFactors = FALSE
   )
+  
+  # Clean feature names
+  features$V2 <- gsub("_", "-", features$V2)  # Replace underscores with dashes
   
   # Read the barcodes
   barcodes <- read.table(
@@ -150,8 +160,12 @@ read_count_matrix <- function(file_path, ext) {
                  "csv" = read.csv(file_path, row.names = 1),
                  stop("Unsupported file format")
   )
+  
+  # Clean row names
+  rownames(data) <- gsub("_", "-", rownames(data))  # Replace underscores with dashes
   as(as.matrix(data), "dgCMatrix")
 }
+
 
 # Helper function for reading AnnData files
 read_anndata <- function(file_path) {
