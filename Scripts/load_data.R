@@ -75,7 +75,7 @@ load_data_server <- function(input, output, session, app_state) {
       }
       
       # Check if the required files are present
-      required_files <- c("barcodes.tsv", "features.tsv", "matrix.mtx")
+      required_files <- c("barcodes.tsv", "genes.tsv", "matrix.mtx")
       uploaded_files <- list.files(temp_dir)
       if (!all(required_files %in% uploaded_files)) {
         showNotification("Missing required 10X files.", type = "error")
