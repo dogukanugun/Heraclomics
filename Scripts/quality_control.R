@@ -22,7 +22,7 @@ quality_control_ui <- function(id) {
     # Filtering thresholds
     fluidRow(
       column(4, numericInput(ns("min_features"), "Min Features", value = 200, min = 0)),
-      column(4, numericInput(ns("max_features"), "Max Features", value = 2500, min = 0,max = 5000)),
+      column(4, numericInput(ns("max_features"), "Max Features", value = 2500, min = 250,max = 5000)),
       column(4, numericInput(ns("max_percent_mt"), "Max Percent MT", value = 5, min = 0, max = 100))
     ),
     
@@ -108,7 +108,8 @@ quality_control_server <- function(input, output, session, app_state) {
     
     # Generate histogram for percent.mt
     output$histogram <- renderPlot({
-      hist(filtered_data()[["percent.mt"]], main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
+      percent_mt_values <- unlist(filtered_data()[["percent.mt"]])  # Ensure the values are a numeric vector
+      hist(as.numeric(percent_mt_values), main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
     }, height = function() { input$plot_height })
     
     # Display a summary of the QC process
@@ -180,7 +181,8 @@ quality_control_server <- function(input, output, session, app_state) {
     filename = function() { "histogram.png" },
     content = function(file) {
       png(file)
-      hist(filtered_data()[["percent.mt"]], main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
+      percent_mt_values <- unlist(filtered_data()[["percent.mt"]])  # Ensure the values are a numeric vector
+      hist(as.numeric(percent_mt_values), main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
       dev.off()
     }
   )
