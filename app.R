@@ -1,5 +1,6 @@
 # app.R
-options(future.globals.maxSize = 16 * 1024^3)  # Increase to 2 GiB
+options(future.globals.maxSize = 16 * 1024^3)  # Increase to 16 GiB
+options(shiny.maxRequestSize = 500 * 1024^2)
 library(shiny)
 library(shinydashboard)
 library(shinyjs)
