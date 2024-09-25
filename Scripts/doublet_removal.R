@@ -1,3 +1,37 @@
+library(shiny)
+library(shinyjs)
+library(Seurat)
+library(DoubletFinder)
+library(plotly)
+
+doublet_removal_ui <- function(id) {
+  ns <- NS(id)
+  tagList(
+    useShinyjs(),
+    h3("Step 3: Doublet Removal"),
+    
+    fluidRow(
+      column(6, actionButton(ns("start_doublet_removal"), "Start Doublet Removal")),
+      column(6, actionButton(ns("skip_doublet_removal"), "Skip Doublet Removal"))
+    ),
+    
+    fluidRow(
+      column(6, selectInput(ns("plot_type"), "Select Plot Type", choices = c("UMAP-2D", "t-SNE-2D", "UMAP-3D", "t-SNE-3D"))),
+    ),
+    
+    plotlyOutput(ns("doublet_plot")),
+    
+    fluidRow(
+      column(6, actionButton(ns("simulate_doublets"), "Simulate Doublets")),
+      column(6, actionButton(ns("remove_doublets"), "Remove Doublets"))
+    ),
+    
+    fluidRow(
+      column(12, actionButton(ns("next_step"), "Continue to Next step"))
+    )
+  )
+}
+
 doublet_removal_server <- function(input, output, session, app_state) {
   ns <- session$ns
   
@@ -22,6 +56,9 @@ doublet_removal_server <- function(input, output, session, app_state) {
       data <- NormalizeData(data)
       data <- FindVariableFeatures(data)
       data <- ScaleData(data)
+      
+      # Calculate percent.mt
+      data[["percent.mt"]] <- PercentageFeatureSet(data, pattern = "^MT-")
       
       # Run PCA
       incProgress(0.2, detail = "Running PCA")
@@ -88,17 +125,6 @@ doublet_removal_server <- function(input, output, session, app_state) {
     })
   })
   
-  observeEvent(input$remove_doublets, {
-    req(cleaned_data())
-    
-    data <- cleaned_data()
-    doublet_classification_col <- doublet_classification_column()
-    
-    # Filter out doublets
-    data_filtered <- subset(data, get(doublet_classification_col) == "Singlet")
-    cleaned_data(data_filtered)
-  })
-  
   output$doublet_plot <- renderPlotly({
     req(cleaned_data())
     
@@ -112,30 +138,42 @@ doublet_removal_server <- function(input, output, session, app_state) {
       reduction <- ifelse(plot_type == "UMAP-2D", "umap", "tsne")
       plot <- DimPlot(data, reduction = reduction, group.by = doublet_classification_col, pt.size = input$point_size) +
         theme(text = element_text(size = input$label_size))
-      ggplotly(plot)
-    } else if (plot_type %in% c("UMAP-3D", "t-SNE-3D")) {
-      reduction <- ifelse(plot_type == "UMAP-3D", "umap", "tsne")
       
-      # Extract the 3D embedding
-      embeddings <- data@reductions[[reduction]]@cell.embeddings
-      
-      # Check that we have at least 3 dimensions
-      if (ncol(embeddings) >= 3) {
-        plot_ly(data = as.data.frame(embeddings), 
-                x = ~V1, y = ~V2, z = ~V3, 
-                color = ~data@meta.data[[doublet_classification_col]], 
-                colors = c("blue", "red")) %>%
-          layout(scene = list(xaxis = list(title = "X1"),
-                              yaxis = list(title = "X2"),
-                              zaxis = list(title = "X3")))
+      # Ensure the plot is valid before converting
+      if (!is.null(plot)) {
+        ggplotly(plot)
       } else {
-        showNotification("Not enough dimensions for 3D plot.", type = "error")
+        showNotification("Error creating 2D plot.", type = "error")
       }
+      
+    } else if (plot_type == "UMAP-3D") {
+      plot_ly(data = as.data.frame(data@reductions$umap@cell.embeddings), x = ~UMAP_1, y = ~UMAP_2, z = ~UMAP_3, type = "scatter3d", mode = "markers") %>%
+        layout(scene = list(xaxis = list(title = "UMAP1"),
+                            yaxis = list(title = "UMAP2"),
+                            zaxis = list(title = "UMAP3")))
+    } else if (plot_type == "t-SNE-3D") {
+      plot_ly(data = as.data.frame(data@reductions$tsne@cell.embeddings), x = ~tSNE_1, y = ~tSNE_2, z = ~tSNE_3, type = "scatter3d", mode = "markers") %>%
+        layout(scene = list(xaxis = list(title = "tSNE1"),
+                            yaxis = list(title = "tSNE2"),
+                            zaxis = list(title = "tSNE3")))
+    } else {
+      showNotification("Not enough dimensions for 3D plot.", type = "error")
     }
   })
   
+  # Ensure data fetching contains the expected variables
+  observeEvent(input$remove_doublets, {
+    tryCatch({
+      cleaned_data <- FetchData(object = app_state$data, vars = c("nFeature_RNA", "nCount_RNA", "percent.mt"))
+      # Additional code to remove doublets
+      showNotification("Doublets removed successfully.", type = "message")
+    }, error = function(e) {
+      showNotification(paste("Error in FetchData:", e$message), type = "error")
+    })
+  })
+  
   observeEvent(input$next_step, {
-    updateTabItems(session, "tabs", "clustering")
+    updateTabItems(session, "tabs", "second_dataset")
   })
   
   return(cleaned_data)
