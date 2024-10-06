@@ -1,197 +1,355 @@
-# Load required libraries
+# Scripts/quality_control.R
+
+# Load necessary libraries
 library(shiny)
 library(shinyjs)
+library(shinyalert)
 library(Seurat)
-library(colourpicker)  # Load the colourpicker package
-library(shiny.router)  # Load the shiny.router package
+library(ggplot2)
+library(plotly)
+library(shinyWidgets)
+library(cowplot)
+library(htmlwidgets)  # For saving interactive plots as HTML
+library(tensorflow)
+library(keras)
 
-# UI for Quality Control step
-quality_control_ui <- function(id) {
+# Quality Control Module UI Function
+qualityControlUI <- function(id) {
   ns <- NS(id)
   tagList(
-    h3("Quality Control"),
-    
-    # Adjusters for label size, point size, plot height, and point color
+    useShinyjs(),  # Enable shinyjs
+    h2("Quality Control"),
     fluidRow(
-      column(3, sliderInput(ns("label_size"), "Label Size", min = 8, max = 20, value = 10)),
-      column(3, sliderInput(ns("point_size"), "Point Size", min = 0.1, max = 10, value = 1)),
-      column(3, sliderInput(ns("plot_height"), "Plot Height", min = 200, max = 1000, value = 300)),
-      column(3, colourInput(ns("point_color"), "Point Color", value = "orange"))
+      box(
+        title = "QC Parameters",
+        width = 4,
+        status = "primary",
+        solidHeader = TRUE,
+        collapsible = TRUE,
+        # Input controls for QC thresholds
+        numericInput(
+          ns("min_features"),
+          "Minimum Features (Genes) per Cell:",
+          value = 200,
+          min = 0
+        ),
+        numericInput(
+          ns("max_features"),
+          "Maximum Features (Genes) per Cell:",
+          value = 3500,
+          min = 0
+        ),
+        numericInput(
+          ns("min_counts"),
+          "Minimum Counts per Cell:",
+          value = 500,
+          min = 0
+        ),
+        numericInput(
+          ns("max_counts"),
+          "Maximum Counts per Cell:",
+          value = 10000,
+          min = 0,
+          max = 100000
+        ),
+        numericInput(
+          ns("max_mt"),
+          "Maximum Percentage of Mitochondrial Genes:",
+          value = 10,
+          min = 0,
+          max = 100
+        ),
+        numericInput(
+          ns("max_ribo"),
+          "Maximum Percentage of Ribosomal Genes:",
+          value = 50,
+          min = 0,
+          max = 100
+        ),
+        actionButton(ns("apply_filters"), "Apply", icon = icon("filter"))
+      ),
+      box(
+        title = "Plot Adjustments",
+        width = 4,
+        status = "primary",
+        solidHeader = TRUE,
+        collapsible = TRUE,
+        sliderInput(
+          ns("label_size"),
+          "Label Size:",
+          min = 6,
+          max = 20,
+          value = 10
+        ),
+        sliderInput(
+          ns("point_size"),
+          "Point Size:",
+          min = 0.1,
+          max = 5,
+          value = 1,
+          step = 0.1
+        ),
+        sliderInput(
+          ns("plot_height"),
+          "Plot Height (px):",
+          min = 100,
+          max = 1000,
+          value = 300,
+          step = 50
+        )
+      ),
+      box(
+        title = "Select Violin Plots to Display",
+        width = 4,
+        status = "primary",
+        solidHeader = TRUE,
+        collapsible = TRUE,
+        checkboxGroupInput(
+          ns("selected_violin"),
+          "Choose Violin Plots:",
+          choices = list(
+            "nFeature_RNA" = "nFeature_RNA",
+            "nCount_RNA" = "nCount_RNA",
+            "percent.mt" = "percent.mt",
+            "percent.ribo" = "percent.ribo"
+          ),
+          selected = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
+        )
+      )
     ),
-    
-    # Filtering thresholds
     fluidRow(
-      column(4, numericInput(ns("min_features"), "Min Features", value = 200, min = 0)),
-      column(4, numericInput(ns("max_features"), "Max Features", value = 2500, min = 250,max = 5000)),
-      column(4, numericInput(ns("max_percent_mt"), "Max Percent MT", value = 5, min = 0, max = 100))
+      box(
+        title = "QC Plots",
+        width = 12,
+        height ="auto",
+        status = "primary",
+        solidHeader = TRUE,
+        collapsible = TRUE,
+        tabsetPanel(
+          tabPanel(
+            "Violin Plots",
+            downloadButton(ns("download_violin"), "Download Selected Violin Plots"),
+            uiOutput(ns("violin_plots_ui"))
+          ),
+          tabPanel(
+            "Scatter Plots",
+            downloadButton(ns("download_scatter"), "Download Scatter Plots"),
+            plotlyOutput(ns("scatter_plots"), height = "auto")
+          ),
+          tabPanel(
+            "Histograms",
+            downloadButton(ns("download_histogram"), "Download Histograms"),
+            plotlyOutput(ns("histograms"), height = "auto")
+          )
+        )
+      )
     ),
-    
-    # Display scatter plots
     fluidRow(
-      column(6, plotOutput(ns("scatter_plot1")), downloadButton(ns("download_scatter_plot1"), "Download Scatter Plot 1")),
-      column(6, plotOutput(ns("scatter_plot2")), downloadButton(ns("download_scatter_plot2"), "Download Scatter Plot 2"))
-    ),
-    
-    # Display violin plots
-    fluidRow(
-      column(4, plotOutput(ns("violin_plot1")), downloadButton(ns("download_violin_plot1"), "Download Violin Plot 1")),
-      column(4, plotOutput(ns("violin_plot2")), downloadButton(ns("download_violin_plot2"), "Download Violin Plot 2")),
-      column(4, plotOutput(ns("violin_plot3")), downloadButton(ns("download_violin_plot3"), "Download Violin Plot 3"))
-    ),
-    
-    # Display histogram
-    fluidRow(
-      column(12, plotOutput(ns("histogram")), downloadButton(ns("download_histogram"), "Download Histogram"))
-    ),
-    
-    # Display QC summary
-    fluidRow(
-      column(12, verbatimTextOutput(ns("qc_summary")))
-    ),
-    
-    # Button to proceed to the next step
-    fluidRow(
-      column(12, actionButton(ns("next_step"), "Next Step", disabled = TRUE))
+      box(
+        title = "Proceed to Doublet Removal",
+        width = 12,
+        status = "success",
+        solidHeader = TRUE,
+        collapsible = TRUE,
+        collapsed = TRUE,
+        
+          actionButton(ns("continue_to_doublet"), "Continue to Next Step", icon = icon("arrow-right"))
+        
+      )
     )
   )
 }
 
-# Server logic for Quality Control step
-quality_control_server <- function(input, output, session, app_state) {
-  ns <- session$ns
-  
-  # Reactive expression to store filtered data
-  filtered_data <- reactive({
-    req(app_state$data)
+# Quality Control Module Server Function
+qualityControlServer <- function(id, rv) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+    proceed_to_doublet <- reactiveVal(FALSE)
     
-    # Perform quality control
-    data_for_qc <- app_state$data
+    # Reactive values to store plots
+    violin_plots <- reactiveValues(
+      nFeature_RNA = NULL,
+      nCount_RNA = NULL,
+      percent.mt = NULL,
+      percent.ribo = NULL
+    )
     
-    # Calculate percent.mt
-    data_for_qc[["percent.mt"]] <- PercentageFeatureSet(data_for_qc, pattern = "^MT-")
+    scatter_plots <- reactiveVal(NULL)
+    histogram_plot <- reactiveVal(NULL)
     
-    # Filter cells based on user-defined quality control metrics
-    subset(data_for_qc, subset = nFeature_RNA > input$min_features & nFeature_RNA < input$max_features & percent.mt < input$max_percent_mt)
-  })
-  
-  observe({
-    req(filtered_data())
-    
-    # Generate scatter plots for nCount_RNA vs nFeature_RNA and nCount_RNA vs percent.mt
-    output$scatter_plot1 <- renderPlot({
-      FeatureScatter(filtered_data(), feature1 = "nCount_RNA", feature2 = "nFeature_RNA") +
-        theme(text = element_text(size = input$label_size)) +
-        geom_point(size = input$point_size, color = input$point_color)
-    }, height = function() { input$plot_height })
-    
-    output$scatter_plot2 <- renderPlot({
-      FeatureScatter(filtered_data(), feature1 = "nCount_RNA", feature2 = "percent.mt") +
-        theme(text = element_text(size = input$label_size)) +
-        geom_point(size = input$point_size, color = input$point_color)
-    }, height = function() { input$plot_height })
-    
-    # Generate violin plots for nFeature_RNA, nCount_RNA, and percent.mt
-    output$violin_plot1 <- renderPlot({
-      VlnPlot(filtered_data(), features = "nFeature_RNA") +
-        theme(text = element_text(size = input$label_size))
-    }, height = function() { input$plot_height })
-    
-    output$violin_plot2 <- renderPlot({
-      VlnPlot(filtered_data(), features = "nCount_RNA") +
-        theme(text = element_text(size = input$label_size))
-    }, height = function() { input$plot_height })
-    
-    output$violin_plot3 <- renderPlot({
-      VlnPlot(filtered_data(), features = "percent.mt") +
-        theme(text = element_text(size = input$label_size))
-    }, height = function() { input$plot_height })
-    
-    # Generate histogram for percent.mt
-    output$histogram <- renderPlot({
-      percent_mt_values <- unlist(filtered_data()[["percent.mt"]])  # Ensure the values are a numeric vector
-      hist(as.numeric(percent_mt_values), main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
-    }, height = function() { input$plot_height })
-    
-    # Display a summary of the QC process
-    output$qc_summary <- renderPrint({
-      cat("QC Summary:\n")
-      cat("Total cells before filtering:", ncol(app_state$data), "\n")
-      cat("Total cells after filtering:", ncol(filtered_data()), "\n")
-      cat("Cells removed:", ncol(app_state$data) - ncol(filtered_data()), "\n")
-      cat("Genes detected:", nrow(filtered_data()), "\n")
+    # Generate Violin Plots UI based on selection
+    output$violin_plots_ui <- renderUI({
+      req(rv$seurat_object)
+      selected <- input$selected_violin
+      plot_output_list <- lapply(selected, function(feature) {
+        plotlyOutput(ns(paste0("violin_plot_", feature)))
+      })
+      do.call(tagList, plot_output_list)
     })
     
-    shinyjs::enable("next_step")
+    # Observe when the "Apply" button is clicked
+    observeEvent(input$apply_filters, {
+      req(rv$seurat_object)
+      seurat_obj <- rv$seurat_object
+      
+      # Ensure 'percent.ribo' is calculated
+      if (!"percent.ribo" %in% colnames(seurat_obj@meta.data)) {
+        seurat_obj[["percent.ribo"]] <- PercentageFeatureSet(seurat_obj, pattern = "^RPS|^RPL")
+      }
+      
+      # Define filters based on user input
+      filters <- WhichCells(seurat_obj, expression = 
+                              nFeature_RNA > input$min_features & 
+                              nFeature_RNA < input$max_features & 
+                              nCount_RNA > input$min_counts & 
+                              nCount_RNA < input$max_counts & 
+                              percent.mt < input$max_mt &
+                              percent.ribo < input$max_ribo)
+      
+      # Subset the Seurat object
+      seurat_obj_filtered <- subset(seurat_obj, cells = filters)
+      
+      # Update the reactive value
+      rv$seurat_object <- seurat_obj_filtered
+      
+      
+      
+      # Generate Individual Violin Plots based on selection
+      observe({
+        req(input$selected_violin)
+        lapply(input$selected_violin, function(feature) {
+          output[[paste0("violin_plot_", feature)]] <- renderPlotly({
+            p <- VlnPlot(
+              seurat_obj_filtered,
+              features = feature,
+              pt.size = input$point_size
+            ) + theme(text = element_text(size = input$label_size))
+            ggplotly(p, height = input$plot_height)
+          })
+        })
+      })
+      
+      # Generate Scatter Plots
+      plot1 <- FeatureScatter(
+        seurat_obj_filtered,
+        feature1 = "nCount_RNA",
+        feature2 = "nFeature_RNA",
+        pt.size = input$point_size
+      ) + theme(text = element_text(size = input$label_size))
+      
+      plot2 <- FeatureScatter(
+        seurat_obj_filtered,
+        feature1 = "nCount_RNA",
+        feature2 = "percent.mt",
+        pt.size = input$point_size
+      ) + theme(text = element_text(size = input$label_size))
+      
+      plot1_plotly <- ggplotly(plot1)
+      plot2_plotly <- ggplotly(plot2)
+      
+      scatter_plots(plot1_plotly)
+      scatter_plots(plot2_plotly)
+      
+      output$scatter_plots <- renderPlotly({
+        subplot(plot1_plotly, plot2_plotly, nrows = 1, margin = 0.05) %>%
+          layout(height = input$plot_height)
+      })
+      
+      # Generate Histograms
+      hist_features <- c("nFeature_RNA", "nCount_RNA")
+      histogram_list <- lapply(hist_features, function(feature) {
+        p <- ggplot(seurat_obj_filtered@meta.data, aes(x = .data[[feature]])) +
+          geom_histogram(binwidth = 30, fill = "steelblue", color = "black") +
+          theme_minimal() +
+          theme(text = element_text(size = input$label_size)) +
+          labs(x = feature, y = "Count")
+        ggplotly(p)
+      })
+      
+      histogram_plot(subplot(histogram_list, nrows = 2, margin = 0.05) %>%
+                       layout(height = input$plot_height))
+      
+      output$histograms <- renderPlotly({
+        histogram_plot()
+      })
+      
+      # Show success message
+      shinyalert(
+        title = "Success",
+        text = "Filters applied and plots generated successfully!",
+        type = "success",
+        timer = 2000,
+        closeOnEsc = TRUE,
+        closeOnClickOutside = TRUE,
+        showConfirmButton = FALSE
+      )
+      
+      # Enable the "Continue to Next Step" button
+      shinyjs::enable(ns("continue_to_doublet"))
+    })
+    
+    # Download handlers for Violin Plots
+    output$download_violin <- downloadHandler(
+      filename = function() { "violin_plots.html" },
+      content = function(file) {
+        selected <- input$selected_violin
+        if (length(selected) == 0) {
+          showNotification("No violin plots selected for download.", type = "error")
+          return(NULL)
+        }
+        # Create a list of plotly objects
+        plot_list <- lapply(selected, function(feature) {
+          violin_plots[[feature]]
+        })
+        # Combine them into a single HTML file
+        combined_plots <- subplot(plot_list, nrows = 2, margin = 0.05)
+        saveWidget(combined_plots, file, selfcontained = TRUE)
+      }
+    )
+    
+    # Download handlers for Scatter Plots
+    output$download_scatter <- downloadHandler(
+      filename = function() { "scatter_plots.html" },
+      content = function(file) {
+        if (is.null(scatter_plots())) {
+          showNotification("No scatter plots available for download.", type = "error")
+          return(NULL)
+        }
+        saveWidget(scatter_plots(), file, selfcontained = TRUE)
+      }
+    )
+    
+    # Download handlers for Histograms
+    output$download_histogram <- downloadHandler(
+      filename = function() { "histograms.html" },
+      content = function(file) {
+        if (is.null(histogram_plot())) {
+          showNotification("No histograms available for download.", type = "error")
+          return(NULL)
+        }
+        saveWidget(histogram_plot(), file, selfcontained = TRUE)
+      }
+    )
+    
+    # Observe the "Continue to Next Step" button
+    observeEvent(input$continue_to_doublet, {
+      shinyalert(
+        title = "Proceed to Doublet Removal?",
+        text = "Are you sure you want to proceed to the next step?",
+        type = "warning",
+        showCancelButton = TRUE,
+        confirmButtonText = "Yes, proceed",
+        cancelButtonText = "No, stay here",
+        callbackR = function(value) {
+          if (value) {
+            # User confirmed, set proceed_to_doublet to TRUE
+            proceed_to_doublet(TRUE)
+          }
+        }
+      )
+    })
+    
+    # Return the reactive value
+    return(list(proceed_to_doublet = proceed_to_doublet))
   })
-  
-  # Download handlers for plots
-  output$download_scatter_plot1 <- downloadHandler(
-    filename = function() { "scatter_plot1.png" },
-    content = function(file) {
-      png(file)
-      print(FeatureScatter(filtered_data(), feature1 = "nCount_RNA", feature2 = "nFeature_RNA") +
-              theme(text = element_text(size = input$label_size)) +
-              geom_point(size = input$point_size, color = input$point_color))
-      dev.off()
-    }
-  )
-  
-  output$download_scatter_plot2 <- downloadHandler(
-    filename = function() { "scatter_plot2.png" },
-    content = function(file) {
-      png(file)
-      print(FeatureScatter(filtered_data(), feature1 = "nCount_RNA", feature2 = "percent.mt") +
-              theme(text = element_text(size = input$label_size)) +
-              geom_point(size = input$point_size, color = input$point_color))
-      dev.off()
-    }
-  )
-  
-  output$download_violin_plot1 <- downloadHandler(
-    filename = function() { "violin_plot1.png" },
-    content = function(file) {
-      png(file)
-      print(VlnPlot(filtered_data(), features = "nFeature_RNA") +
-              theme(text = element_text(size = input$label_size)))
-      dev.off()
-    }
-  )
-  
-  output$download_violin_plot2 <- downloadHandler(
-    filename = function() { "violin_plot2.png" },
-    content = function(file) {
-      png(file)
-      print(VlnPlot(filtered_data(), features = "nCount_RNA") +
-              theme(text = element_text(size = input$label_size)))
-      dev.off()
-    }
-  )
-  
-  output$download_violin_plot3 <- downloadHandler(
-    filename = function() { "violin_plot3.png" },
-    content = function(file) {
-      png(file)
-      print(VlnPlot(filtered_data(), features = "percent.mt") +
-              theme(text = element_text(size = input$label_size)))
-      dev.off()
-    }
-  )
-  
-  output$download_histogram <- downloadHandler(
-    filename = function() { "histogram.png" },
-    content = function(file) {
-      png(file)
-      percent_mt_values <- unlist(filtered_data()[["percent.mt"]])  # Ensure the values are a numeric vector
-      hist(as.numeric(percent_mt_values), main = "Histogram of percent.mt", xlab = "percent.mt", breaks = 50)
-      dev.off()
-    }
-  )
-  
-  # Navigate to the next step when the "Next Step" button is clicked
-  observeEvent(input$next_step, {
-    updateTabItems(session, "tabs", "doublet_removal")  # Navigate to the doublet_removal tab
-  })
-  
-  # Return the filtered data for the next step
-  return(filtered_data)
 }
