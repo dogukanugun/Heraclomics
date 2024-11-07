@@ -1,5 +1,3 @@
-# Scripts/quality_control.R
-
 # Load necessary libraries
 library(shiny)
 library(shinyjs)
@@ -36,33 +34,33 @@ qualityControlUI <- function(id) {
         numericInput(
           ns("max_features"),
           "Maximum Features (Genes) per Cell:",
-          value = 3500,
+          value = 7500,
           min = 0
         ),
         numericInput(
           ns("min_counts"),
           "Minimum Counts per Cell:",
-          value = 500,
+          value = 200,
           min = 0
         ),
         numericInput(
           ns("max_counts"),
           "Maximum Counts per Cell:",
-          value = 10000,
+          value = 100000,
           min = 0,
-          max = 100000
+          max = 1000000
         ),
         numericInput(
           ns("max_mt"),
           "Maximum Percentage of Mitochondrial Genes:",
-          value = 10,
+          value = 100,
           min = 0,
           max = 100
         ),
         numericInput(
           ns("max_ribo"),
           "Maximum Percentage of Ribosomal Genes:",
-          value = 50,
+          value = 100,
           min = 0,
           max = 100
         ),
@@ -152,9 +150,7 @@ qualityControlUI <- function(id) {
         solidHeader = TRUE,
         collapsible = TRUE,
         collapsed = TRUE,
-        
-          actionButton(ns("continue_to_doublet"), "Continue to Next Step", icon = icon("arrow-right"))
-        
+        actionButton(ns("continue_to_doublet"), "Continue to Next Step", icon = icon("arrow-right"))
       )
     )
   )
@@ -186,108 +182,130 @@ qualityControlServer <- function(id, rv) {
       })
       do.call(tagList, plot_output_list)
     })
-    
+    gc()
     # Observe when the "Apply" button is clicked
     observeEvent(input$apply_filters, {
       req(rv$seurat_object)
-      seurat_obj <- rv$seurat_object
-      
-      # Ensure 'percent.ribo' is calculated
-      if (!"percent.ribo" %in% colnames(seurat_obj@meta.data)) {
-        seurat_obj[["percent.ribo"]] <- PercentageFeatureSet(seurat_obj, pattern = "^RPS|^RPL")
-      }
-      
-      # Define filters based on user input
-      filters <- WhichCells(seurat_obj, expression = 
-                              nFeature_RNA > input$min_features & 
-                              nFeature_RNA < input$max_features & 
-                              nCount_RNA > input$min_counts & 
-                              nCount_RNA < input$max_counts & 
-                              percent.mt < input$max_mt &
-                              percent.ribo < input$max_ribo)
-      
-      # Subset the Seurat object
-      seurat_obj_filtered <- subset(seurat_obj, cells = filters)
-      
-      # Update the reactive value
-      rv$seurat_object <- seurat_obj_filtered
-      
-      
-      
-      # Generate Individual Violin Plots based on selection
-      observe({
-        req(input$selected_violin)
-        lapply(input$selected_violin, function(feature) {
-          output[[paste0("violin_plot_", feature)]] <- renderPlotly({
-            p <- VlnPlot(
-              seurat_obj_filtered,
-              features = feature,
-              pt.size = input$point_size
-            ) + theme(text = element_text(size = input$label_size))
-            ggplotly(p, height = input$plot_height)
+      tryCatch({
+        seurat_obj <- rv$seurat_object
+        
+        # Ensure 'percent.ribo' is calculated
+        if (!"percent.ribo" %in% colnames(seurat_obj@meta.data)) {
+          seurat_obj[["percent.ribo"]] <- PercentageFeatureSet(seurat_obj, pattern = "^RPS|^RPL")
+        }
+        
+        # Define filters based on user input
+        filters <- WhichCells(seurat_obj, expression = 
+                                nFeature_RNA > input$min_features & 
+                                nFeature_RNA < input$max_features & 
+                                nCount_RNA > input$min_counts & 
+                                nCount_RNA < input$max_counts & 
+                                percent.mt < input$max_mt &
+                                percent.ribo < input$max_ribo)
+        
+        # Subset the Seurat object
+        seurat_obj_filtered <- subset(seurat_obj, cells = filters)
+        
+        # Update the reactive value
+        rv$seurat_object <- seurat_obj_filtered
+        
+        # Generate Individual Violin Plots based on selection
+        observe({
+          req(input$selected_violin)
+          lapply(input$selected_violin, function(feature) {
+            output[[paste0("violin_plot_", feature)]] <- renderPlotly({
+              p <- VlnPlot(
+                seurat_obj_filtered,
+                features = feature,
+                pt.size = input$point_size
+              ) + theme(text = element_text(size = input$label_size))
+              ggplotly(p, height = input$plot_height)
+            })
           })
         })
+        
+        # Generate Scatter Plots if percent.mt is not all zero
+        if (all(seurat_obj_filtered$percent.mt == 0)) {
+          showNotification("Mitochondrial gene percentage is zero for all cells. Only generating nCount_RNA vs nFeature_RNA scatter plot.", type = "warning")
+          plot1 <- FeatureScatter(
+            seurat_obj_filtered,
+            feature1 = "nCount_RNA",
+            feature2 = "nFeature_RNA",
+            pt.size = input$point_size
+          ) + theme(text = element_text(size = input$label_size))
+          plot1_plotly <- ggplotly(plot1)
+          scatter_plots(plot1_plotly)
+          output$scatter_plots <- renderPlotly({
+            plot1_plotly %>%
+              layout(height = input$plot_height)
+          })
+        } else {
+          plot1 <- FeatureScatter(
+            seurat_obj_filtered,
+            feature1 = "nCount_RNA",
+            feature2 = "nFeature_RNA",
+            pt.size = input$point_size
+          ) + theme(text = element_text(size = input$label_size))
+          
+          plot2 <- FeatureScatter(
+            seurat_obj_filtered,
+            feature1 = "nCount_RNA",
+            feature2 = "percent.mt",
+            pt.size = input$point_size
+          ) + theme(text = element_text(size = input$label_size))
+          
+          plot1_plotly <- ggplotly(plot1)
+          plot2_plotly <- ggplotly(plot2)
+          
+          scatter_plots(list(plot1_plotly, plot2_plotly))
+          output$scatter_plots <- renderPlotly({
+            subplot(plot1_plotly, plot2_plotly, nrows = 1, margin = 0.05) %>%
+              layout(height = input$plot_height)
+          })
+        }
+        
+        # Generate Histograms if percent.mt is not all zero
+        hist_features <- c("nFeature_RNA", "nCount_RNA")
+        if (!all(seurat_obj_filtered$percent.mt == 0)) {
+          hist_features <- c(hist_features, "percent.mt")
+        }
+        
+        histogram_list <- lapply(hist_features, function(feature) {
+          p <- ggplot(seurat_obj_filtered@meta.data, aes(x = .data[[feature]])) +
+            geom_histogram(binwidth = 30, fill = "steelblue", color = "black") +
+            theme_minimal() +
+            theme(text = element_text(size = input$label_size)) +
+            labs(x = feature, y = "Count")
+          ggplotly(p)
+        })
+        
+        histogram_plot(subplot(histogram_list, nrows = length(hist_features), margin = 0.05) %>%
+                         layout(height = input$plot_height))
+        
+        output$histograms <- renderPlotly({
+          histogram_plot()
+        })
+        
+        # Show success message
+        shinyalert(
+          title = "Success",
+          text = "Filters applied and plots generated successfully!",
+          type = "success",
+          timer = 2000,
+          closeOnEsc = TRUE,
+          closeOnClickOutside = TRUE,
+          showConfirmButton = FALSE
+        )
+        
+        # Enable the "Continue to Next Step" button
+        shinyjs::enable(ns("continue_to_doublet"))
+        
+      }, error = function(e) {
+        # Handle error and show a notification
+        showNotification(paste("An error occurred:", e$message), type = "error")
       })
-      
-      # Generate Scatter Plots
-      plot1 <- FeatureScatter(
-        seurat_obj_filtered,
-        feature1 = "nCount_RNA",
-        feature2 = "nFeature_RNA",
-        pt.size = input$point_size
-      ) + theme(text = element_text(size = input$label_size))
-      
-      plot2 <- FeatureScatter(
-        seurat_obj_filtered,
-        feature1 = "nCount_RNA",
-        feature2 = "percent.mt",
-        pt.size = input$point_size
-      ) + theme(text = element_text(size = input$label_size))
-      
-      plot1_plotly <- ggplotly(plot1)
-      plot2_plotly <- ggplotly(plot2)
-      
-      scatter_plots(plot1_plotly)
-      scatter_plots(plot2_plotly)
-      
-      output$scatter_plots <- renderPlotly({
-        subplot(plot1_plotly, plot2_plotly, nrows = 1, margin = 0.05) %>%
-          layout(height = input$plot_height)
-      })
-      
-      # Generate Histograms
-      hist_features <- c("nFeature_RNA", "nCount_RNA")
-      histogram_list <- lapply(hist_features, function(feature) {
-        p <- ggplot(seurat_obj_filtered@meta.data, aes(x = .data[[feature]])) +
-          geom_histogram(binwidth = 30, fill = "steelblue", color = "black") +
-          theme_minimal() +
-          theme(text = element_text(size = input$label_size)) +
-          labs(x = feature, y = "Count")
-        ggplotly(p)
-      })
-      
-      histogram_plot(subplot(histogram_list, nrows = 2, margin = 0.05) %>%
-                       layout(height = input$plot_height))
-      
-      output$histograms <- renderPlotly({
-        histogram_plot()
-      })
-      
-      # Show success message
-      shinyalert(
-        title = "Success",
-        text = "Filters applied and plots generated successfully!",
-        type = "success",
-        timer = 2000,
-        closeOnEsc = TRUE,
-        closeOnClickOutside = TRUE,
-        showConfirmButton = FALSE
-      )
-      
-      # Enable the "Continue to Next Step" button
-      shinyjs::enable(ns("continue_to_doublet"))
     })
-    
+    gc()
     # Download handlers for Violin Plots
     output$download_violin <- downloadHandler(
       filename = function() { "violin_plots.html" },
