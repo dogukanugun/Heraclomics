@@ -1,5 +1,3 @@
-# app.R
-
 options(future.globals.maxSize = 64 * 1024^3)  # Increase to 64 GiB
 options(shiny.maxRequestSize = 5000 * 1024^2)
 
@@ -18,7 +16,8 @@ library(shinyWidgets)
 library(tensorflow)
 library(keras)
 library(harmony)
-library(ggrepel)  # For PCA Loadings Plot
+library(ggrepel)
+library(MEGENA)
 
 # Source all the module scripts
 source("Scripts/introduction.R")
@@ -29,8 +28,14 @@ source("Scripts/load_second_data.R")
 source("Scripts/second_quality_control.R")
 source("Scripts/second_doublet_removal.R")
 source("Scripts/integration_dimensionality_reduction.R")
-source("Scripts/clustering.R")  # Added clustering module
-source("Scripts/data_correction.R")  # Added Data Correction module
+source("Scripts/clustering.R")
+source("Scripts/data_correction.R")
+source("Scripts/labelling_clusters.R")
+source("Scripts/gene_expression.R")
+source("Scripts/gene_coexpression.R")
+source("Scripts/gene_regulatory_networks.R")
+source("Scripts/trajectory_analysis.R")
+source("Scripts/cell_communication.R")
 
 # Define UI
 ui <- dashboardPage(
@@ -46,7 +51,17 @@ ui <- dashboardPage(
                 menuItem("Second Dataset Doublet Removal", tabName = "doublet_removal_second", icon = icon("trash")),
                 menuItem("Integration and Dimensionality Reduction", tabName = "dim_reduction", icon = icon("project-diagram")),
                 menuItem("Clustering", tabName = "clustering", icon = icon("sitemap")),
-                menuItem("Data Correction", tabName = "data_correction", icon = icon("magic"))  # Added Data Correction menu item
+                menuItem("Data Correction", tabName = "data_correction", icon = icon("magic")),
+                menuItem("Further Analysis", tabName = "further_analysis", icon = icon("tasks"), startExpanded = TRUE,
+                         menuSubItem("Labelling Clusters", tabName = "labelling_clusters", icon = icon("tags")),
+                         menuSubItem("Gene Expression", tabName = "gene_expression", icon = icon("chart-bar")),
+                         menuSubItem("Gene Co-Expression Networks", tabName = "gene_coexpression"),
+                         menuSubItem("Gene Regulatory Networks", tabName = "gene_regulatory_network"),
+                         menuSubItem("Trajectory Analysis", tabName = "trajectory_analysis"),
+                         menuSubItem("Cell Communication", tabName = "cell_comm")
+                         
+                         
+                )
     )
   ),
   dashboardBody(
@@ -62,7 +77,16 @@ ui <- dashboardPage(
       tabItem(tabName = "doublet_removal_second", secondDoubletRemovalUI("second_doublet_removal")),
       tabItem(tabName = "dim_reduction", integrationDimReductionUI("dim_reduction_ui")),
       tabItem(tabName = "clustering", clusteringUI("clustering_ui")),
-      tabItem(tabName = "data_correction", dataCorrectionUI("data_correction_ui"))  # Added Data Correction tab item
+      tabItem(tabName = "data_correction", dataCorrectionUI("data_correction_ui")),
+      # Further Analysis Tab
+      tabItem(tabName = "labelling_clusters", labellingClustersUI("labelling_clusters_ui")),
+      tabItem(tabName = "gene_expression", geneExpressionUI("gene_expression")), 
+      tabItem(tabName = "gene_coexpression", geneCoexpressionUI("gene_coexpression")),
+      tabItem(tabName = "gene_regulatory_network", geneRegulatoryNetworkUI("gene_regulatory_network_ui")),
+      tabItem(tabName = "trajectory_analysis", trajectoryAnalysisUI("trajectory_analysis_ui")),
+      tabItem(tabName = "cell_comm", cellCommunicationUI("cell_comm_ui"))
+     
+      
     )
   )
 )
@@ -81,8 +105,10 @@ server <- function(input, output, session) {
     seurat_object = NULL,
     seurat_second = NULL,
     seurat_integrated = NULL,
-    proceed_to_clustering = FALSE
-    # Add any additional reactive values if needed
+    proceed_to_clustering = FALSE,
+    proceed_to_further_analysis = FALSE,  # New reactive value for further analysis,
+    cluster_labels = NULL,
+    trajectory_data = NULL
   )
   
   # Hide all tabs except Introduction at startup
@@ -95,7 +121,8 @@ server <- function(input, output, session) {
     hideTab(inputId = "sidebarMenu", target = "doublet_removal_second")
     hideTab(inputId = "sidebarMenu", target = "dim_reduction")
     hideTab(inputId = "sidebarMenu", target = "clustering")
-    hideTab(inputId = "sidebarMenu", target = "data_correction")  # Hide Data Correction tab at startup
+    hideTab(inputId = "sidebarMenu", target = "data_correction")
+    hideTab(inputId = "sidebarMenu", target = "further_analysis")
     updateTabItems(session, "sidebarMenu", "introduction")
   })
   
@@ -221,31 +248,47 @@ server <- function(input, output, session) {
   clustering_return <- clusteringServer("clustering_ui", rv)
   
   # Observe when to proceed to Data Correction
-  observeEvent(clustering_return$proceed_to_next_step, {
-    if (isTRUE(clustering_return$proceed_to_next_step)) {
+  observeEvent(clustering_return$proceed_to_next_step(), {
+    if (isTRUE(clustering_return$proceed_to_next_step())) {
       # Enable Data Correction tab and switch to it
       showTab(inputId = "sidebarMenu", target = "data_correction")
       updateTabItems(session, "sidebarMenu", "data_correction")
       # Reset the reactive value
-      clustering_return$proceed_to_next_step <- FALSE
+      rv$proceed_to_next_step <- FALSE  # Ensure this is reset in rv
     }
   })
   
   # Call the Data Correction module and capture its return value
+  
   data_correction_return <- dataCorrectionServer("data_correction_ui", rv)
   
-  # Observe when to proceed to the next step after Data Correction
+  # Observe when to proceed to Further Analysis after Data Correction
   observeEvent(data_correction_return$proceed_to_next_step, {
     if (isTRUE(data_correction_return$proceed_to_next_step)) {
-      # Enable the next tab (e.g., Visualization or Export)
-      # Replace "next_step_tab" with the actual tabName of the next step
-      showTab(inputId = "sidebarMenu", target = "next_step_tab")
-      updateTabItems(session, "sidebarMenu", "next_step_tab")
+      # Enable Further Analysis tab and switch to it
+      showTab(inputId = "sidebarMenu", target = "further_analysis")
+      updateTabItems(session, "sidebarMenu", "labelling_clusters")  # Show Labelling Clusters first
       # Reset the reactive value
       data_correction_return$proceed_to_next_step <- FALSE
     }
   })
+  
+  # Call the Labelling Clusters module (currently only this module is enabled under Further Analysis)
+  labellingClustersServer("labelling_clusters_ui", rv)
+  # Call the Gene Expression module
+  geneExpressionServer("gene_expression", rv)
+  
+  geneCoexpressionServer("gene_coexpression", rv)
+  
+  
+  gene_regulatory_network_return <- geneRegulatoryNetworkServer("gene_regulatory_network_ui", rv)
+  
+  trajectoryAnalysisServer("trajectory_analysis_ui", rv)
+  
+  cellCommunicationServer("cell_comm_ui", rv)
+  
+  
 }
 
 # Run the application
-shinyApp(ui = ui, server = server)
+shinyApp(ui = ui, server = server)   
