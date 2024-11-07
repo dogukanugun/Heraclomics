@@ -8,7 +8,7 @@ library(plotly)
 library(dplyr)
 library(htmlwidgets)
 library(RColorBrewer)
-library(leiden)
+
 
 # Clustering Module UI Function
 clusteringUI <- function(id) {
@@ -365,9 +365,12 @@ clusteringServer <- function(id, rv) {
     
     ### Next Step Button ###
     observeEvent(input$next_step, {
-      # Signal to proceed to the next step
-      rv$proceed_to_next_step <- TRUE
+      rv$proceed_to_next_step <- TRUE  # Set this reactive value
     })
     
+    # Return the reactive value to signal the next step
+    return(list(proceed_to_next_step = reactive(rv$proceed_to_next_step)))
   })
+    
+  
 }
