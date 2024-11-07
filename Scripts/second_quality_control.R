@@ -34,13 +34,13 @@ secondQualityControlUI <- function(id) {
         numericInput(
           ns("max_features"),
           "Maximum Features (Genes) per Cell:",
-          value = 3500,
+          value = 7500,
           min = 0
         ),
         numericInput(
           ns("min_counts"),
           "Minimum Counts per Cell:",
-          value = 500,
+          value = 200,
           min = 0
         ),
         numericInput(
@@ -53,14 +53,14 @@ secondQualityControlUI <- function(id) {
         numericInput(
           ns("max_mt"),
           "Maximum Percentage of Mitochondrial Genes:",
-          value = 10,
+          value = 100,
           min = 0,
           max = 100
         ),
         numericInput(
           ns("max_ribo"),
           "Maximum Percentage of Ribosomal Genes:",
-          value = 50,
+          value = 100,
           min = 0,
           max = 100
         ),
