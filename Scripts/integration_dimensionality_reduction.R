@@ -315,10 +315,10 @@ integrationDimReductionUI <- function(id) {
   )
 }
 # Harmony Integration and Dimensionality Reduction Module Server Function
-# Harmony Integration and Dimensionality Reduction Module Server Function
 integrationDimReductionServer <- function(id, rv) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+    
     
     ### Integration and Dimensionality Reduction Process ###
     observeEvent(input$run_analysis, {
@@ -336,7 +336,7 @@ integrationDimReductionServer <- function(id, rv) {
       ))
       
       # Check if a second dataset is provided
-      has_second <- !is.null(rv$seurat_second)
+      has_second <- !is.null(rv$seurat_second) && input$sample_name_2 != ""
       print("Second dataset check complete")
       
       # Assign batch information
@@ -418,13 +418,22 @@ integrationDimReductionServer <- function(id, rv) {
           
           ### Step 5: Harmony Integration ###
           incProgress(0.4, detail = "Running Harmony integration...")
-          print("Running Harmony...")
-          if (!"batch" %in% colnames(merged_data@meta.data)) {
-            stop("Error: 'batch' variable not found in metadata.")
+          if (has_second) {
+            print("Running Harmony...")
+            if (!"batch" %in% colnames(merged_data@meta.data)) {
+              stop("Error: 'batch' variable not found in metadata.")
+            }
+            
+            # Check if the batch variable has at least two levels
+            if (length(unique(merged_data$batch)) > 1) {
+              merged_data <- RunHarmony(object = merged_data, group.by.vars = "batch", assay.use = rv$assay_used, plot_convergence = FALSE, verbose = FALSE)
+              print("Harmony integration complete")
+            } else {
+              stop("Error: 'batch' must have at least two levels for Harmony integration.")
+            }
+          } else {
+            print("Skipping Harmony integration due to single dataset")
           }
-          
-          merged_data <- RunHarmony(object = merged_data, group.by.vars = "batch", assay.use = rv$assay_used, plot_convergence = FALSE, verbose = FALSE)
-          print("Harmony integration complete")
           
           ### Step 6: PCA after Harmony ###
           incProgress(0.55, detail = "Running PCA after Harmony...")
@@ -629,6 +638,139 @@ integrationDimReductionServer <- function(id, rv) {
           
           ### Step 11: Finalize Analysis ###
           incProgress(1, detail = "Analysis complete.")
+          # UMAP Plot Download Handler
+          output$download_general_umap_plot <- downloadHandler(
+            filename = function() {
+              paste("general_umap_plot_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              plot(DimPlot(
+                rv$seurat_integrated,
+                reduction = "umap",
+                group.by = "batch",
+                pt.size = input$point_size,
+                label = TRUE,
+                label.size = input$label_size / 3
+              ))
+              dev.off()
+            }
+          )
+          
+          # t-SNE Plot Download Handler
+          output$download_general_tsne_plot <- downloadHandler(
+            filename = function() {
+              paste("general_tsne_plot_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              plot(DimPlot(
+                rv$seurat_integrated,
+                reduction = "tsne",
+                group.by = "batch",
+                pt.size = input$point_size,
+                label = TRUE,
+                label.size = input$label_size / 3
+              ))
+              dev.off()
+            }
+          )
+          
+          # UMAP Gene Expression Plot Download Handler
+          output$download_umap_gene_plot <- downloadHandler(
+            filename = function() {
+              paste("umap_gene_plot_", input$selected_gene, "_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              plot(FeaturePlot(
+                object = rv$seurat_integrated,
+                features = input$selected_gene,
+                reduction = "umap",
+                cols = c("lightgrey", "red"),
+                label = FALSE,
+                pt.size = input$point_size
+              ) + ggtitle(paste("UMAP Plot -", input$selected_gene, "Expression")))
+              dev.off()
+            }
+          )
+          
+          # t-SNE Gene Expression Plot Download Handler
+          output$download_tsne_gene_plot <- downloadHandler(
+            filename = function() {
+              paste("tsne_gene_plot_", input$selected_gene_tsne, "_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              plot(FeaturePlot(
+                object = rv$seurat_integrated,
+                features = input$selected_gene_tsne,
+                reduction = "tsne",
+                cols = c("lightgrey", "red"),
+                label = FALSE,
+                pt.size = input$point_size
+              ) + ggtitle(paste("t-SNE Plot -", input$selected_gene_tsne, "Expression")))
+              dev.off()
+            }
+          )
+          
+          # Dimensionality Reduction Heatmap Download Handler
+          output$download_dimension_reduction_heatmap <- downloadHandler(
+            filename = function() {
+              paste("dimension_reduction_heatmap_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file, width = input$heatmap_width, height = input$heatmap_height)
+              selected_dims <- as.numeric(input$dimension_select)
+              plot(DimHeatmap(
+                object = rv$seurat_integrated,
+                dims = selected_dims,
+                reduction = "pca",
+                cells = 500,
+                balanced = TRUE
+              ))
+              dev.off()
+            }
+          )
+          
+          # Elbow Plot Download Handler
+          output$download_elbow_plot <- downloadHandler(
+            filename = function() {
+              paste("elbow_plot_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              plot(ElbowPlot(
+                object = rv$seurat_integrated,
+                ndims = 30
+              ) + ggtitle("Elbow Plot"))
+              dev.off()
+            }
+          )
+          
+          # PCA Loadings Plot Download Handler
+          output$download_loadings_plot <- downloadHandler(
+            filename = function() {
+              paste("pca_loadings_plot_", Sys.Date(), ".png", sep = "")
+            },
+            content = function(file) {
+              png(file)
+              loadings <- Loadings(rv$seurat_integrated, reduction = "pca")
+              loadings_df <- as.data.frame(loadings[, 1:2])
+              colnames(loadings_df) <- c("PC_1", "PC_2")
+              loadings_df$gene <- rownames(loadings_df)
+              top_loadings <- loadings_df %>%
+                arrange(desc(abs(PC_1))) %>%
+                slice(1:10)
+              
+              plot(ggplot(loadings_df, aes(x = PC_1, y = PC_2)) +
+                     geom_point(color = "steelblue", size = input$point_size) +
+                     geom_text_repel(data = top_loadings, aes(label = gene), size = input$label_size / 3, max.overlaps = Inf) + 
+                     theme_minimal() +
+                     labs(title = "Top PCA Loadings", x = "PC 1", y = "PC 2"))
+              dev.off()
+            }
+          )
           
           # Close the modal dialog
           removeModal()
@@ -705,3 +847,4 @@ integrationDimReductionServer <- function(id, rv) {
     
   })
 }
+            
